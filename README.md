@@ -58,7 +58,7 @@ AI-powered government bid preparation assistant. Paste a bid solicitation URL or
 - **Styling**: Tailwind CSS
 - **AI**: OpenAI GPT-4o-mini
 - **Web Scraping**: Cheerio
-- **PDF Parsing**: pdf-parse
+- **PDF Parsing**: pdfjs-dist (Mozilla PDF.js)
 - **Icons**: Lucide React
 
 ## Deployment
