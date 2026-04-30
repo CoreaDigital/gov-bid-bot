@@ -12,6 +12,7 @@ export default function InputForm({ onAnalyze, isLoading }: InputFormProps) {
   const [url, setUrl] = useState("");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -30,12 +31,22 @@ export default function InputForm({ onAnalyze, isLoading }: InputFormProps) {
     const file = e.dataTransfer.files[0];
     if (file && file.type === "application/pdf") {
       setPdfFile(file);
+      setFileError(null);
+    } else if (file) {
+      setFileError("Only PDF files are supported. Please drop a .pdf file.");
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) setPdfFile(file);
+    if (file && file.type === "application/pdf") {
+      setPdfFile(file);
+      setFileError(null);
+    } else if (file) {
+      // Non-PDF selected — reset the input and show an error
+      e.target.value = "";
+      setFileError("Only PDF files are supported. Please select a .pdf file.");
+    }
   };
 
   return (
@@ -129,6 +140,9 @@ export default function InputForm({ onAnalyze, isLoading }: InputFormProps) {
             </div>
           )}
         </div>
+        {fileError && (
+          <p className="mt-1.5 text-xs text-red-600">{fileError}</p>
+        )}
       </div>
 
       <button

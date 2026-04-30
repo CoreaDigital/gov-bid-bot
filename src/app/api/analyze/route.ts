@@ -1,13 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scrapeBidUrl } from "@/lib/scraper";
 import { parsePdf } from "@/lib/pdfParser";
-import { analyzeBidContent, analyzeBidContentFallback, getAIProvider } from "@/lib/aiAnalyzer";
+import { analyzeBidContent, analyzeBidContentFallback, getAIProvider, CONTENT_TRUNCATION_LIMIT } from "@/lib/aiAnalyzer";
 import { AnalyzeResponse } from "@/types/bid";
 
 export const maxDuration = 60;
 
+// ---------------------------------------------------------------------------
+// Simple in-memory rate limiter (10 requests per IP per minute).
+// Not suitable for multi-instance deployments but provides a basic safeguard.
+// ---------------------------------------------------------------------------
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 10;
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RATE_LIMIT_MAX_REQUESTS) return false;
+  entry.count++;
+  return true;
+}
+
+const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
+
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
+    if (!checkRateLimit(ip)) {
+      return NextResponse.json<AnalyzeResponse>(
+        { success: false, error: "Too many requests. Please try again in a minute." },
+        { status: 429 }
+      );
+    }
+
     const formData = await request.formData();
     const url = formData.get("url") as string | null;
     const pdfFile = formData.get("pdf") as File | null;
@@ -19,7 +53,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // PDF size guard
+    if (pdfFile && pdfFile.size > MAX_PDF_SIZE_BYTES) {
+      return NextResponse.json<AnalyzeResponse>(
+        { success: false, error: "PDF file is too large. Maximum allowed size is 20 MB." },
+        { status: 413 }
+      );
+    }
+
     let combinedContent = "";
+    let contentTruncated = false;
+    let pagesAnalyzed: number | undefined;
+    let totalPages: number | undefined;
 
     // Scrape URL if provided
     if (url) {
@@ -64,6 +109,11 @@ export async function POST(request: NextRequest) {
             combinedContent += `Pages: ${parsed.numPages}\n\n`;
             combinedContent += parsed.text;
             combinedContent += "\n\n";
+            if (parsed.truncated) {
+              contentTruncated = true;
+              pagesAnalyzed = parsed.extractedPages;
+              totalPages = parsed.numPages;
+            }
           } catch (pdfError) {
             console.error("PDF URL parsing error:", pdfError);
             combinedContent += `Note: Could not parse PDF from URL: ${url}\n\n`;
@@ -85,6 +135,11 @@ export async function POST(request: NextRequest) {
         combinedContent += `Pages: ${parsed.numPages}\n\n`;
         combinedContent += parsed.text;
         combinedContent += "\n\n";
+        if (parsed.truncated) {
+          contentTruncated = true;
+          pagesAnalyzed = parsed.extractedPages;
+          totalPages = parsed.numPages;
+        }
       } catch (pdfError) {
         console.error("PDF parsing error:", pdfError);
         combinedContent += `Note: Could not parse PDF file: ${pdfFile.name}\n\n`;
@@ -116,7 +171,21 @@ export async function POST(request: NextRequest) {
 
     analysis.rawContent = url || undefined;
 
-    return NextResponse.json<AnalyzeResponse>({ success: true, analysis });
+    // Also flag truncation when the AI prompt window clips content that fit
+    // within the page limit (e.g. very dense pages)
+    if (!contentTruncated && combinedContent.length > CONTENT_TRUNCATION_LIMIT) {
+      contentTruncated = true;
+    }
+
+    return NextResponse.json<AnalyzeResponse>({
+      success: true,
+      analysis,
+      ...(contentTruncated && {
+        contentTruncated: true,
+        ...(pagesAnalyzed !== undefined && { pagesAnalyzed }),
+        ...(totalPages !== undefined && { totalPages }),
+      }),
+    });
   } catch (error) {
     console.error("Analysis error:", error);
     return NextResponse.json<AnalyzeResponse>(

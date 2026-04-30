@@ -50,4 +50,10 @@ export interface AnalyzeResponse {
   success: boolean;
   analysis?: BidAnalysis;
   error?: string;
+  /** Set to true when the document was too large to fully analyze. */
+  contentTruncated?: boolean;
+  /** Number of pages that were extracted and analyzed (PDF inputs only). */
+  pagesAnalyzed?: number;
+  /** Total number of pages in the submitted PDF (PDF inputs only). */
+  totalPages?: number;
 }

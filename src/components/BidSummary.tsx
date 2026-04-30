@@ -1,7 +1,7 @@
 "use client";
 
 import { BidAnalysis } from "@/types/bid";
-import { Building2, Hash, Tag, Activity, DollarSign, Code, ExternalLink } from "lucide-react";
+import { Building2, Hash, Tag, User, DollarSign, Code, ExternalLink } from "lucide-react";
 
 interface BidSummaryProps {
   analysis: BidAnalysis;
@@ -122,7 +122,7 @@ export default function BidSummary({ analysis }: BidSummaryProps) {
           <div className="pt-4 border-t border-gray-100">
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
               <span className="flex items-center gap-1.5">
-                <Activity size={12} />
+                <User size={12} />
                 Point of Contact
               </span>
             </h3>
