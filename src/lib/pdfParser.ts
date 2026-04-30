@@ -1,8 +1,18 @@
 import { pathToFileURL } from "url";
 
+// Extracting more than this many pages wastes time and memory: the AI prompt
+// window is 15k characters (~5-7 dense pages).  75 pages covers virtually all
+// standard bid solicitation bodies while keeping parse time reasonable.
+const MAX_PAGES_TO_EXTRACT = 75;
+
 export interface ParsedPdfData {
   text: string;
+  /** Total number of pages in the PDF document. */
   numPages: number;
+  /** Number of pages that were actually extracted (≤ numPages). */
+  extractedPages: number;
+  /** True when the document has more pages than MAX_PAGES_TO_EXTRACT. */
+  truncated: boolean;
   info?: Record<string, unknown>;
 }
 
@@ -34,9 +44,18 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedPdfData> {
   const pdf = await loadingTask.promise;
 
   const numPages = pdf.numPages;
+  const extractedPages = Math.min(numPages, MAX_PAGES_TO_EXTRACT);
+  const truncated = extractedPages < numPages;
+
+  if (truncated) {
+    console.warn(
+      `[pdfParser] PDF has ${numPages} pages; extracting first ${extractedPages} to stay within limits`
+    );
+  }
+
   const textParts: string[] = [];
 
-  for (let i = 1; i <= numPages; i++) {
+  for (let i = 1; i <= extractedPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     const pageText = content.items
@@ -48,5 +67,5 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedPdfData> {
 
   const text = textParts.join("\n").replace(/\s+/g, " ").trim();
 
-  return { text, numPages };
+  return { text, numPages, extractedPages, truncated };
 }

@@ -62,6 +62,9 @@ export async function POST(request: NextRequest) {
     }
 
     let combinedContent = "";
+    let contentTruncated = false;
+    let pagesAnalyzed: number | undefined;
+    let totalPages: number | undefined;
 
     // Scrape URL if provided
     if (url) {
@@ -106,6 +109,11 @@ export async function POST(request: NextRequest) {
             combinedContent += `Pages: ${parsed.numPages}\n\n`;
             combinedContent += parsed.text;
             combinedContent += "\n\n";
+            if (parsed.truncated) {
+              contentTruncated = true;
+              pagesAnalyzed = parsed.extractedPages;
+              totalPages = parsed.numPages;
+            }
           } catch (pdfError) {
             console.error("PDF URL parsing error:", pdfError);
             combinedContent += `Note: Could not parse PDF from URL: ${url}\n\n`;
@@ -127,6 +135,11 @@ export async function POST(request: NextRequest) {
         combinedContent += `Pages: ${parsed.numPages}\n\n`;
         combinedContent += parsed.text;
         combinedContent += "\n\n";
+        if (parsed.truncated) {
+          contentTruncated = true;
+          pagesAnalyzed = parsed.extractedPages;
+          totalPages = parsed.numPages;
+        }
       } catch (pdfError) {
         console.error("PDF parsing error:", pdfError);
         combinedContent += `Note: Could not parse PDF file: ${pdfFile.name}\n\n`;
@@ -158,7 +171,21 @@ export async function POST(request: NextRequest) {
 
     analysis.rawContent = url || undefined;
 
-    return NextResponse.json<AnalyzeResponse>({ success: true, analysis });
+    // Also flag truncation when the AI prompt window clips content that fit
+    // within the page limit (e.g. very dense pages)
+    if (!contentTruncated && combinedContent.length > 15000) {
+      contentTruncated = true;
+    }
+
+    return NextResponse.json<AnalyzeResponse>({
+      success: true,
+      analysis,
+      ...(contentTruncated && {
+        contentTruncated: true,
+        ...(pagesAnalyzed !== undefined && { pagesAnalyzed }),
+        ...(totalPages !== undefined && { totalPages }),
+      }),
+    });
   } catch (error) {
     console.error("Analysis error:", error);
     return NextResponse.json<AnalyzeResponse>(
