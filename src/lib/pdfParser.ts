@@ -1,0 +1,34 @@
+export interface ParsedPdfData {
+  text: string;
+  numPages: number;
+  info?: Record<string, unknown>;
+}
+
+export async function parsePdf(buffer: Buffer): Promise<ParsedPdfData> {
+  // Dynamically import pdfjs-dist in a way compatible with Next.js server components
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+  // Disable worker for server-side use
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+
+  const uint8Array = new Uint8Array(buffer);
+  const loadingTask = pdfjsLib.getDocument({ data: uint8Array, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true });
+  const pdf = await loadingTask.promise;
+
+  const numPages = pdf.numPages;
+  const textParts: string[] = [];
+
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .filter((item) => "str" in item)
+      .map((item) => (item as { str: string }).str)
+      .join(" ");
+    textParts.push(pageText);
+  }
+
+  const text = textParts.join("\n").replace(/\s+/g, " ").trim();
+
+  return { text, numPages };
+}
