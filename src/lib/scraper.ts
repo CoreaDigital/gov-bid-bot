@@ -27,6 +27,11 @@ export async function scrapeBidUrl(url: string): Promise<ScrapedBidData> {
     throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
   }
 
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/pdf")) {
+    throw new Error("URL_IS_PDF");
+  }
+
   const html = await response.text();
   const $ = cheerio.load(html);
 
