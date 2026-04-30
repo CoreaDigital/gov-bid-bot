@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scrapeBidUrl } from "@/lib/scraper";
 import { parsePdf } from "@/lib/pdfParser";
-import { analyzeBidContent, analyzeBidContentFallback, getAIProvider } from "@/lib/aiAnalyzer";
+import { analyzeBidContent, analyzeBidContentFallback, getAIProvider, CONTENT_TRUNCATION_LIMIT } from "@/lib/aiAnalyzer";
 import { AnalyzeResponse } from "@/types/bid";
 
 export const maxDuration = 60;
@@ -173,7 +173,7 @@ export async function POST(request: NextRequest) {
 
     // Also flag truncation when the AI prompt window clips content that fit
     // within the page limit (e.g. very dense pages)
-    if (!contentTruncated && combinedContent.length > 15000) {
+    if (!contentTruncated && combinedContent.length > CONTENT_TRUNCATION_LIMIT) {
       contentTruncated = true;
     }
 
