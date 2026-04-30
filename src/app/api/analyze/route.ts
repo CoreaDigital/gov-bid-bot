@@ -45,8 +45,33 @@ export async function POST(request: NextRequest) {
         }
         combinedContent += `\nFull Content:\n${scraped.rawText}\n\n`;
       } catch (scrapeError) {
-        console.error("Scraping error:", scrapeError);
-        combinedContent += `Note: Could not fully scrape the URL. URL: ${url}\n\n`;
+        if (scrapeError instanceof Error && scrapeError.message === "URL_IS_PDF") {
+          // The URL points directly to a PDF file — download and parse it
+          try {
+            const pdfResponse = await fetch(url, {
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              },
+            });
+            if (!pdfResponse.ok) {
+              throw new Error(`Failed to fetch PDF: ${pdfResponse.status} ${pdfResponse.statusText}`);
+            }
+            const arrayBuffer = await pdfResponse.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const parsed = await parsePdf(buffer);
+            combinedContent += `=== BID DOCUMENT FROM URL: ${url} ===\n\n`;
+            combinedContent += `Pages: ${parsed.numPages}\n\n`;
+            combinedContent += parsed.text;
+            combinedContent += "\n\n";
+          } catch (pdfError) {
+            console.error("PDF URL parsing error:", pdfError);
+            combinedContent += `Note: Could not parse PDF from URL: ${url}\n\n`;
+          }
+        } else {
+          console.error("Scraping error:", scrapeError);
+          combinedContent += `Note: Could not fully scrape the URL. URL: ${url}\n\n`;
+        }
       }
     }
 
