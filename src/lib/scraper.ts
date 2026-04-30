@@ -94,7 +94,13 @@ export async function scrapeBidUrl(url: string): Promise<ScrapedBidData> {
   $("script, style, nav, footer, header").remove();
 
   // Cap rawText to avoid unbounded memory usage
-  const rawText = $("body").text().replace(/\s+/g, " ").trim().substring(0, RAW_TEXT_LIMIT);
+  const fullRawText = $("body").text().replace(/\s+/g, " ").trim();
+  if (fullRawText.length > RAW_TEXT_LIMIT) {
+    console.warn(
+      `[scraper] rawText truncated from ${fullRawText.length} to ${RAW_TEXT_LIMIT} characters`
+    );
+  }
+  const rawText = fullRawText.substring(0, RAW_TEXT_LIMIT);
 
   // Try to extract structured data from common government bid site patterns
   const result: ScrapedBidData = { rawText };

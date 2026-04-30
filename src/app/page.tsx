@@ -59,8 +59,8 @@ export default function Home() {
       : analysis.solicitationNumber;
     a.download = `bid-analysis-${fileId.replace(/[^a-zA-Z0-9]/g, "-")}.md`;
     a.click();
-    // Revoke after a short delay to ensure the download has started
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // Revoke after the current call-stack unwinds so the browser has started the download
+    queueMicrotask(() => URL.revokeObjectURL(url));
   };
 
   return (

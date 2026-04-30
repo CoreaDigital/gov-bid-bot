@@ -36,7 +36,7 @@ When specific information is not available, make reasonable inferences or mark a
 function buildPrompt(content: string): string {
   if (content.length > CONTENT_TRUNCATION_LIMIT) {
     console.warn(
-      `[aiAnalyzer] Content truncated from ${content.length} to ${CONTENT_TRUNCATION_LIMIT} characters for AI analysis`
+      `[aiAnalyzer] Content will be truncated from ${content.length} to ${CONTENT_TRUNCATION_LIMIT} characters for AI analysis`
     );
   }
   return `Analyze the following government bid solicitation content and provide a comprehensive bid preparation guide.
