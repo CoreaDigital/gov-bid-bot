@@ -1,4 +1,5 @@
 import { pathToFileURL } from "url";
+import path from "path";
 
 // Extracting more than this many pages wastes time and memory: the AI prompt
 // window is 15k characters (~5-7 dense pages).  75 pages covers virtually all
@@ -25,10 +26,13 @@ async function getPdfjsLib() {
 
   const lib = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
-  // pdfjs-dist v4+ throws when workerSrc is empty. Resolve the worker path via
-  // require.resolve so it works in any deployment regardless of process.cwd().
-  const workerPath: string = require.resolve(
-    "pdfjs-dist/legacy/build/pdf.worker.mjs"
+  // pdfjs-dist v4+ throws when workerSrc is empty.
+  // Do NOT use require.resolve() here — Turbopack transforms it into a numeric
+  // module ID instead of a file path, breaking pathToFileURL(). Build the path
+  // from process.cwd() (always the Next.js project root in both dev and Vercel
+  // production) so it survives bundling.
+  const workerPath: string = path.resolve(
+    "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"
   );
   lib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
 
