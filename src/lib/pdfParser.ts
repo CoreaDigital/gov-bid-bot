@@ -1,3 +1,6 @@
+import path from "path";
+import { pathToFileURL } from "url";
+
 export interface ParsedPdfData {
   text: string;
   numPages: number;
@@ -8,8 +11,13 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedPdfData> {
   // Dynamically import pdfjs-dist in a way compatible with Next.js server components
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
-  // Disable worker for server-side use
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+  // pdfjs-dist v4+ throws when workerSrc is empty. Point it at the bundled worker
+  // file. pathToFileURL handles Windows backslash separators correctly.
+  const workerPath = path.join(
+    process.cwd(),
+    "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"
+  );
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
 
   const uint8Array = new Uint8Array(buffer);
   const loadingTask = pdfjsLib.getDocument({ data: uint8Array, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true });
