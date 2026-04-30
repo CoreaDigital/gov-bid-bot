@@ -35,7 +35,12 @@ export default function InputForm({ onAnalyze, isLoading }: InputFormProps) {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) setPdfFile(file);
+    if (file && file.type === "application/pdf") {
+      setPdfFile(file);
+    } else if (file) {
+      // Non-PDF selected — reset the input so the user can try again
+      e.target.value = "";
+    }
   };
 
   return (

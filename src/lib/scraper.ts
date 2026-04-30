@@ -1,5 +1,10 @@
 import * as cheerio from "cheerio";
 
+const RAW_TEXT_LIMIT = 50000;
+
+// PDF magic bytes: %PDF-
+const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d];
+
 export interface ScrapedBidData {
   title?: string;
   solicitationNumber?: string;
@@ -12,7 +17,47 @@ export interface ScrapedBidData {
   rawText: string;
 }
 
+// ---------------------------------------------------------------------------
+// SSRF protection – validate that the URL is a safe public endpoint
+// ---------------------------------------------------------------------------
+function validateUrl(rawUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("Invalid URL format");
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Only HTTP and HTTPS URLs are allowed");
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Block well-known internal hostnames
+  if (["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(hostname)) {
+    throw new Error("Access to internal resources is not allowed");
+  }
+
+  // Block AWS/GCP/Azure metadata endpoints and link-local addresses
+  if (hostname === "169.254.169.254" || hostname.startsWith("169.254.")) {
+    throw new Error("Access to internal resources is not allowed");
+  }
+
+  // Block private IPv4 ranges
+  const privateRanges = [
+    /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
+    /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/,
+    /^192\.168\.\d{1,3}\.\d{1,3}$/,
+  ];
+  if (privateRanges.some((re) => re.test(hostname))) {
+    throw new Error("Access to internal resources is not allowed");
+  }
+}
+
 export async function scrapeBidUrl(url: string): Promise<ScrapedBidData> {
+  validateUrl(url);
+
   const response = await fetch(url, {
     headers: {
       "User-Agent":
@@ -27,18 +72,29 @@ export async function scrapeBidUrl(url: string): Promise<ScrapedBidData> {
     throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
   }
 
+  // Buffer the body once so we can inspect both bytes and text
+  const bodyBuffer = await response.arrayBuffer();
+  const bodyBytes = new Uint8Array(bodyBuffer);
+
+  // Detect PDF by Content-Type header OR by magic bytes (%PDF-)
   const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/pdf")) {
+  const hasPdfContentType = contentType.includes("application/pdf");
+  const hasPdfMagic =
+    bodyBytes.length >= PDF_MAGIC.length &&
+    PDF_MAGIC.every((byte, i) => bodyBytes[i] === byte);
+
+  if (hasPdfContentType || hasPdfMagic) {
     throw new Error("URL_IS_PDF");
   }
 
-  const html = await response.text();
+  const html = new TextDecoder().decode(bodyBuffer);
   const $ = cheerio.load(html);
 
   // Remove script and style tags for cleaner text
   $("script, style, nav, footer, header").remove();
 
-  const rawText = $("body").text().replace(/\s+/g, " ").trim();
+  // Cap rawText to avoid unbounded memory usage
+  const rawText = $("body").text().replace(/\s+/g, " ").trim().substring(0, RAW_TEXT_LIMIT);
 
   // Try to extract structured data from common government bid site patterns
   const result: ScrapedBidData = { rawText };

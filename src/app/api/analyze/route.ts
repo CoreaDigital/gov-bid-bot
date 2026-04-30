@@ -6,8 +6,42 @@ import { AnalyzeResponse } from "@/types/bid";
 
 export const maxDuration = 60;
 
+// ---------------------------------------------------------------------------
+// Simple in-memory rate limiter (10 requests per IP per minute).
+// Not suitable for multi-instance deployments but provides a basic safeguard.
+// ---------------------------------------------------------------------------
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 10;
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RATE_LIMIT_MAX_REQUESTS) return false;
+  entry.count++;
+  return true;
+}
+
+const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
+
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
+    if (!checkRateLimit(ip)) {
+      return NextResponse.json<AnalyzeResponse>(
+        { success: false, error: "Too many requests. Please try again in a minute." },
+        { status: 429 }
+      );
+    }
+
     const formData = await request.formData();
     const url = formData.get("url") as string | null;
     const pdfFile = formData.get("pdf") as File | null;
@@ -16,6 +50,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json<AnalyzeResponse>(
         { success: false, error: "Please provide a bid URL or upload a PDF document." },
         { status: 400 }
+      );
+    }
+
+    // PDF size guard
+    if (pdfFile && pdfFile.size > MAX_PDF_SIZE_BYTES) {
+      return NextResponse.json<AnalyzeResponse>(
+        { success: false, error: "PDF file is too large. Maximum allowed size is 20 MB." },
+        { status: 413 }
       );
     }
 

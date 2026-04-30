@@ -1,4 +1,3 @@
-import path from "path";
 import { pathToFileURL } from "url";
 
 export interface ParsedPdfData {
@@ -7,17 +6,28 @@ export interface ParsedPdfData {
   info?: Record<string, unknown>;
 }
 
-export async function parsePdf(buffer: Buffer): Promise<ParsedPdfData> {
-  // Dynamically import pdfjs-dist in a way compatible with Next.js server components
-  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+// Cache the imported module so subsequent calls within the same process skip
+// the dynamic-import resolution overhead.
+let pdfjsCache: typeof import("pdfjs-dist/legacy/build/pdf.mjs") | null = null;
 
-  // pdfjs-dist v4+ throws when workerSrc is empty. Point it at the bundled worker
-  // file. pathToFileURL handles Windows backslash separators correctly.
-  const workerPath = path.join(
-    process.cwd(),
-    "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"
+async function getPdfjsLib() {
+  if (pdfjsCache) return pdfjsCache;
+
+  const lib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+  // pdfjs-dist v4+ throws when workerSrc is empty. Resolve the worker path via
+  // require.resolve so it works in any deployment regardless of process.cwd().
+  const workerPath: string = require.resolve(
+    "pdfjs-dist/legacy/build/pdf.worker.mjs"
   );
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
+  lib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
+
+  pdfjsCache = lib;
+  return lib;
+}
+
+export async function parsePdf(buffer: Buffer): Promise<ParsedPdfData> {
+  const pdfjsLib = await getPdfjsLib();
 
   const uint8Array = new Uint8Array(buffer);
   const loadingTask = pdfjsLib.getDocument({ data: uint8Array, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true });

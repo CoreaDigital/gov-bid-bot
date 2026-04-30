@@ -2,14 +2,27 @@ import OpenAI from "openai";
 import Groq from "groq-sdk";
 import { BidAnalysis } from "@/types/bid";
 
-function getGroqClient() {
-  return new Groq({ apiKey: process.env.GROQ_API_KEY });
+// ---------------------------------------------------------------------------
+// Model name constants – change here when upgrading models
+// ---------------------------------------------------------------------------
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+const OPENAI_MODEL = "gpt-4o-mini";
+const CONTENT_TRUNCATION_LIMIT = 15000;
+
+// ---------------------------------------------------------------------------
+// Lazy singleton AI clients – reused across warm invocations
+// ---------------------------------------------------------------------------
+let groqClient: Groq | null = null;
+let openaiClient: OpenAI | null = null;
+
+function getGroqClient(): Groq {
+  if (!groqClient) groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  return groqClient;
 }
 
-function getOpenAIClient() {
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
+function getOpenAIClient(): OpenAI {
+  if (!openaiClient) openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return openaiClient;
 }
 
 const SYSTEM_PROMPT = `You are an expert government procurement analyst and bid preparation specialist. 
@@ -21,10 +34,15 @@ Extract all available dates, requirements, and contact information from the prov
 When specific information is not available, make reasonable inferences or mark as "Not specified".`;
 
 function buildPrompt(content: string): string {
+  if (content.length > CONTENT_TRUNCATION_LIMIT) {
+    console.warn(
+      `[aiAnalyzer] Content truncated from ${content.length} to ${CONTENT_TRUNCATION_LIMIT} characters for AI analysis`
+    );
+  }
   return `Analyze the following government bid solicitation content and provide a comprehensive bid preparation guide.
 
 CONTENT:
-${content.substring(0, 15000)}
+${content.substring(0, CONTENT_TRUNCATION_LIMIT)}
 
 Return a JSON object with EXACTLY this structure:
 {
@@ -104,7 +122,7 @@ export async function analyzeBidContent(content: string): Promise<BidAnalysis> {
 async function analyzeBidContentGroq(content: string): Promise<BidAnalysis> {
   const groq = getGroqClient();
   const response = await groq.chat.completions.create({
-    model: "llama-3.3-70b-versatile",
+    model: GROQ_MODEL,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: buildPrompt(content) },
@@ -115,13 +133,13 @@ async function analyzeBidContentGroq(content: string): Promise<BidAnalysis> {
 
   const result = response.choices[0].message.content;
   if (!result) throw new Error("No response from Groq");
-  return JSON.parse(result) as BidAnalysis;
+  return validateBidAnalysis(JSON.parse(result));
 }
 
 async function analyzeBidContentOpenAI(content: string): Promise<BidAnalysis> {
   const openai = getOpenAIClient();
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: OPENAI_MODEL,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: buildPrompt(content) },
@@ -132,7 +150,44 @@ async function analyzeBidContentOpenAI(content: string): Promise<BidAnalysis> {
 
   const result = response.choices[0].message.content;
   if (!result) throw new Error("No response from OpenAI");
-  return JSON.parse(result) as BidAnalysis;
+  return validateBidAnalysis(JSON.parse(result));
+}
+
+// ---------------------------------------------------------------------------
+// Runtime validation – ensures the AI returned the expected shape before we
+// cast to BidAnalysis, surfacing clear errors instead of silent bad data.
+// ---------------------------------------------------------------------------
+function validateBidAnalysis(data: unknown): BidAnalysis {
+  if (!data || typeof data !== "object") {
+    throw new Error("AI returned an invalid (non-object) response");
+  }
+  const obj = data as Record<string, unknown>;
+  const requiredFields = [
+    "title",
+    "solicitationNumber",
+    "agency",
+    "bidType",
+    "status",
+    "description",
+    "scopeOfWork",
+    "keyDates",
+    "actionItems",
+    "requiredDocuments",
+    "evaluationCriteria",
+    "recommendedApproach",
+  ] as const;
+  for (const field of requiredFields) {
+    if (!(field in obj)) {
+      throw new Error(`AI response is missing required field: "${field}"`);
+    }
+  }
+  const arrayFields = ["keyDates", "actionItems", "requiredDocuments", "evaluationCriteria"] as const;
+  for (const field of arrayFields) {
+    if (!Array.isArray(obj[field])) {
+      throw new Error(`AI response field "${field}" must be an array`);
+    }
+  }
+  return data as BidAnalysis;
 }
 
 export async function analyzeBidContentFallback(content: string): Promise<BidAnalysis> {

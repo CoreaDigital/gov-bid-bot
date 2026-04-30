@@ -71,7 +71,7 @@ export default function Timeline({ keyDates }: TimelineProps) {
               }
 
               return (
-                <div key={index} className="flex gap-4 relative">
+                <div key={`${item.label}-${index}`} className="flex gap-4 relative">
                   <div className={`w-10 h-10 rounded-full border-2 flex-shrink-0 flex items-center justify-center z-10 bg-white ${dotColor}`}>
                     {item.isPast ? (
                       <CheckCircle2 size={16} className="text-white" style={{ background: "transparent" }} />
