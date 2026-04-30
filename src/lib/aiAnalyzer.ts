@@ -1,5 +1,10 @@
 import OpenAI from "openai";
+import Groq from "groq-sdk";
 import { BidAnalysis } from "@/types/bid";
+
+function getGroqClient() {
+  return new Groq({ apiKey: process.env.GROQ_API_KEY });
+}
 
 function getOpenAIClient() {
   return new OpenAI({
@@ -15,8 +20,8 @@ Always respond with valid JSON matching the exact schema provided. Be thorough, 
 Extract all available dates, requirements, and contact information from the provided content.
 When specific information is not available, make reasonable inferences or mark as "Not specified".`;
 
-export async function analyzeBidContent(content: string): Promise<BidAnalysis> {
-  const prompt = `Analyze the following government bid solicitation content and provide a comprehensive bid preparation guide.
+function buildPrompt(content: string): string {
+  return `Analyze the following government bid solicitation content and provide a comprehensive bid preparation guide.
 
 CONTENT:
 ${content.substring(0, 15000)}
@@ -79,21 +84,54 @@ Important guidelines:
 - Set isUrgent to true for deadlines within 7 days
 - Order action items by priority and logical sequence
 - Be specific about Florida-specific requirements if this is a Florida state bid`;
+}
 
-  const openai = getOpenAIClient();
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+export function getAIProvider(): "groq" | "openai" | "fallback" {
+  if (process.env.GROQ_API_KEY) return "groq";
+  if (process.env.OPENAI_API_KEY) return "openai";
+  return "fallback";
+}
+
+export async function analyzeBidContent(content: string): Promise<BidAnalysis> {
+  const provider = getAIProvider();
+
+  if (provider === "groq") {
+    return analyzeBidContentGroq(content);
+  }
+  return analyzeBidContentOpenAI(content);
+}
+
+async function analyzeBidContentGroq(content: string): Promise<BidAnalysis> {
+  const groq = getGroqClient();
+  const response = await groq.chat.completions.create({
+    model: "llama-3.3-70b-versatile",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: prompt },
+      { role: "user", content: buildPrompt(content) },
     ],
     response_format: { type: "json_object" },
     temperature: 0.2,
   });
 
   const result = response.choices[0].message.content;
-  if (!result) throw new Error("No response from AI");
+  if (!result) throw new Error("No response from Groq");
+  return JSON.parse(result) as BidAnalysis;
+}
 
+async function analyzeBidContentOpenAI(content: string): Promise<BidAnalysis> {
+  const openai = getOpenAIClient();
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: buildPrompt(content) },
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0.2,
+  });
+
+  const result = response.choices[0].message.content;
+  if (!result) throw new Error("No response from OpenAI");
   return JSON.parse(result) as BidAnalysis;
 }
 

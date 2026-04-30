@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scrapeBidUrl } from "@/lib/scraper";
 import { parsePdf } from "@/lib/pdfParser";
-import { analyzeBidContent, analyzeBidContentFallback } from "@/lib/aiAnalyzer";
+import { analyzeBidContent, analyzeBidContentFallback, getAIProvider } from "@/lib/aiAnalyzer";
 import { AnalyzeResponse } from "@/types/bid";
 
 export const maxDuration = 60;
@@ -75,16 +75,17 @@ export async function POST(request: NextRequest) {
 
     // Run AI analysis
     let analysis;
-    if (process.env.OPENAI_API_KEY) {
+    const provider = getAIProvider();
+    if (provider !== "fallback") {
       try {
         analysis = await analyzeBidContent(combinedContent);
       } catch (aiError) {
-        console.error("AI analysis error:", aiError);
-        // Fall back to basic analysis if AI fails
+        console.error(`AI analysis error (${provider}):`, aiError);
+        // Fall back to basic analysis if AI provider fails
         analysis = await analyzeBidContentFallback(combinedContent);
       }
     } else {
-      // Use fallback if no OpenAI API key
+      // No AI key configured — use regex-based fallback
       analysis = await analyzeBidContentFallback(combinedContent);
     }
 
