@@ -1,6 +1,3 @@
-import { pathToFileURL } from "url";
-import path from "path";
-
 // Extracting more than this many pages wastes time and memory: the AI prompt
 // window is 15k characters (~5-7 dense pages).  75 pages covers virtually all
 // standard bid solicitation bodies while keeping parse time reasonable.
@@ -24,17 +21,18 @@ let pdfjsCache: typeof import("pdfjs-dist/legacy/build/pdf.mjs") | null = null;
 async function getPdfjsLib() {
   if (pdfjsCache) return pdfjsCache;
 
-  const lib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  // pdfjs-dist v5 in Node.js runs the worker inline ("fake worker" mode).
+  // It resolves the worker handler via globalThis.pdfjsWorker?.WorkerMessageHandler
+  // before falling back to a dynamic import(workerSrc). Setting this global
+  // avoids the file:// URL import that fails in Vercel's serverless runtime.
+  // pdfjs-dist v5 does not ship type declarations for the worker module;
+  // suppress the implicit-any error for this import.
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-expect-error – no types for legacy worker entry point
+  const workerModule = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+  (globalThis as Record<string, unknown>).pdfjsWorker = workerModule;
 
-  // pdfjs-dist v4+ throws when workerSrc is empty.
-  // Do NOT use require.resolve() here — Turbopack transforms it into a numeric
-  // module ID instead of a file path, breaking pathToFileURL(). Build the path
-  // from process.cwd() (always the Next.js project root in both dev and Vercel
-  // production) so it survives bundling.
-  const workerPath: string = path.resolve(
-    "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"
-  );
-  lib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
+  const lib = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
   pdfjsCache = lib;
   return lib;
