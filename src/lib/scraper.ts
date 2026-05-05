@@ -5,6 +5,188 @@ const RAW_TEXT_LIMIT = 50000;
 // PDF magic bytes: %PDF-
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d];
 
+// ---------------------------------------------------------------------------
+// MyFloridaMarketplace (MFMP) – special handler
+//
+// The vendor portal (vendor.myfloridamarketplace.com) is an Angular Material
+// SPA that renders bid detail data entirely via JavaScript.  A plain fetch()
+// returns only the app shell HTML, so we attempt to call the underlying REST
+// API that the Angular app itself uses.  We try the two most common endpoint
+// patterns; if neither returns parseable JSON we surface a clear error so the
+// user knows to upload the PDF instead.
+// ---------------------------------------------------------------------------
+const MFMP_HOSTNAME = "vendor.myfloridamarketplace.com";
+const MFMP_DETAIL_PATH = /^\/search\/bids\/detail\/(\d+)/;
+
+function extractMFMPBidId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== MFMP_HOSTNAME) return null;
+    const m = parsed.pathname.match(MFMP_DETAIL_PATH);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+async function scrapeMFMPBidDetail(url: string, bidId: string): Promise<ScrapedBidData> {
+  const DEFAULT_HEADERS = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    Referer: url,
+  };
+
+  // Candidate REST API endpoints (most-likely first).
+  const apiCandidates = [
+    `https://${MFMP_HOSTNAME}/api/bids/${bidId}`,
+    `https://${MFMP_HOSTNAME}/api/search/bids/${bidId}`,
+  ];
+
+  for (const apiUrl of apiCandidates) {
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, { headers: DEFAULT_HEADERS });
+    } catch {
+      continue;
+    }
+
+    if (!response.ok) continue;
+
+    const ct = response.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) continue;
+
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch {
+      continue;
+    }
+
+    if (!json || typeof json !== "object") continue;
+
+    // Successfully got JSON – turn it into ScrapedBidData for the AI.
+    return parseMFMPApiJson(json as Record<string, unknown>, url, bidId);
+  }
+
+  // No API endpoint worked – signal that JS rendering is required.
+  throw new Error("MFMP_REQUIRES_JS");
+}
+
+/**
+ * Map the MFMP REST API JSON payload into a ScrapedBidData structure.
+ * We cover the most common field names seen in government Angular portals;
+ * unknown fields are serialised and added to rawText for the AI to use.
+ */
+function parseMFMPApiJson(
+  data: Record<string, unknown>,
+  originalUrl: string,
+  bidId: string
+): ScrapedBidData {
+  const str = (v: unknown): string | undefined =>
+    v != null && String(v).trim() !== "" ? String(v).trim() : undefined;
+
+  // Common field-name aliases used by MFMP / Spring Boot backends.
+  const title =
+    str(data.title) ??
+    str(data.adTitle) ??
+    str(data.solicitation_title) ??
+    str(data.name);
+
+  const solicitationNumber =
+    str(data.adNumber) ??
+    str(data.agencyAdvertisementNumber) ??
+    str(data.solicitationNumber) ??
+    str(data.bidNumber) ??
+    str(data.id) ??
+    bidId;
+
+  const agency =
+    str(data.agency) ??
+    str(data.agencyName) ??
+    str(data.organization) ??
+    str(data.department);
+
+  const status =
+    str(data.status) ??
+    str(data.adStatus) ??
+    str(data.bidStatus);
+
+  const bidType =
+    str(data.type) ??
+    str(data.adType) ??
+    str(data.bidType) ??
+    str(data.noticeType);
+
+  const description =
+    str(data.description) ??
+    str(data.scope) ??
+    str(data.scopeOfWork) ??
+    str(data.summary);
+
+  // Collect every date-like field into the dates map.
+  const dates: Record<string, string> = {};
+  const dateAliases: Array<[string, string]> = [
+    ["publishDate", "Published Date"],
+    ["publishedDate", "Published Date"],
+    ["openDate", "Open Date"],
+    ["startDate", "Start Date"],
+    ["endDate", "End Date"],
+    ["closeDate", "Close Date"],
+    ["dueDate", "Due Date"],
+    ["submissionDeadline", "Submission Deadline"],
+    ["questionsDeadline", "Questions Deadline"],
+    ["questionsDue", "Questions Due"],
+    ["preBidConference", "Pre-Bid Conference"],
+    ["awardDate", "Award Date"],
+  ];
+  for (const [field, label] of dateAliases) {
+    const v = str(data[field]);
+    if (v) dates[label] = v;
+  }
+
+  // Contact info
+  type ContactRecord = Record<string, unknown>;
+  const rawContact =
+    (data.contactInfo as ContactRecord | undefined) ??
+    (data.contact as ContactRecord | undefined) ??
+    (data.pointOfContact as ContactRecord | undefined);
+  const contact: Record<string, string> = {};
+  if (rawContact) {
+    const contactName = str(rawContact.name) ?? str(rawContact.contactName);
+    const contactEmail = str(rawContact.email) ?? str(rawContact.contactEmail);
+    const contactPhone = str(rawContact.phone) ?? str(rawContact.contactPhone);
+    const contactAddress = str(rawContact.address);
+    if (contactName) contact.name = contactName;
+    if (contactEmail) contact.email = contactEmail;
+    if (contactPhone) contact.phone = contactPhone;
+    if (contactAddress) contact.address = contactAddress;
+  }
+
+  // Serialise the full JSON payload so the AI can see everything.
+  const rawText = [
+    `=== MyFloridaMarketplace Bid Detail (ID: ${bidId}) ===`,
+    `URL: ${originalUrl}`,
+    "",
+    JSON.stringify(data, null, 2),
+  ]
+    .join("\n")
+    .substring(0, RAW_TEXT_LIMIT);
+
+  return {
+    title,
+    solicitationNumber,
+    agency,
+    status,
+    bidType,
+    description,
+    dates: Object.keys(dates).length > 0 ? dates : undefined,
+    contact: Object.keys(contact).length > 0 ? contact : undefined,
+    rawText,
+  };
+}
+
 export interface ScrapedBidData {
   title?: string;
   solicitationNumber?: string;
@@ -57,6 +239,14 @@ function validateUrl(rawUrl: string): void {
 
 export async function scrapeBidUrl(url: string): Promise<ScrapedBidData> {
   validateUrl(url);
+
+  // MyFloridaMarketplace bid-detail pages are Angular SPA routes that render
+  // entirely via JavaScript.  Intercept them before the generic fetch so we
+  // can call the underlying REST API directly.
+  const mfmpBidId = extractMFMPBidId(url);
+  if (mfmpBidId !== null) {
+    return scrapeMFMPBidDetail(url, mfmpBidId);
+  }
 
   const response = await fetch(url, {
     headers: {
