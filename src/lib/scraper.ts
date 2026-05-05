@@ -132,9 +132,9 @@ function parseMFMPApiJson(
     ["publishedDate", "Published Date"],
     ["openDate", "Open Date"],
     ["startDate", "Start Date"],
-    ["endDate", "End Date/Submission Deadline"],
-    ["closeDate", "Close Date/Submission Deadline"],
-    ["dueDate", "Submission Deadline"],
+    ["endDate", "End Date"],
+    ["closeDate", "Close Date"],
+    ["dueDate", "Due Date"],
     ["submissionDeadline", "Submission Deadline"],
     ["questionsDeadline", "Questions Deadline"],
     ["questionsDue", "Questions Due"],
@@ -154,14 +154,14 @@ function parseMFMPApiJson(
     (data.pointOfContact as ContactRecord | undefined);
   const contact: Record<string, string> = {};
   if (rawContact) {
-    const cn = str(rawContact.name) ?? str(rawContact.contactName);
-    const ce = str(rawContact.email) ?? str(rawContact.contactEmail);
-    const cp = str(rawContact.phone) ?? str(rawContact.contactPhone);
-    const ca = str(rawContact.address);
-    if (cn) contact.name = cn;
-    if (ce) contact.email = ce;
-    if (cp) contact.phone = cp;
-    if (ca) contact.address = ca;
+    const contactName = str(rawContact.name) ?? str(rawContact.contactName);
+    const contactEmail = str(rawContact.email) ?? str(rawContact.contactEmail);
+    const contactPhone = str(rawContact.phone) ?? str(rawContact.contactPhone);
+    const contactAddress = str(rawContact.address);
+    if (contactName) contact.name = contactName;
+    if (contactEmail) contact.email = contactEmail;
+    if (contactPhone) contact.phone = contactPhone;
+    if (contactAddress) contact.address = contactAddress;
   }
 
   // Serialise the full JSON payload so the AI can see everything.
