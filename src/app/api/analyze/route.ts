@@ -118,6 +118,18 @@ export async function POST(request: NextRequest) {
             console.error("PDF URL parsing error:", pdfError);
             combinedContent += `Note: Could not parse PDF from URL: ${url}\n\n`;
           }
+        } else if (scrapeError instanceof Error && scrapeError.message === "MFMP_REQUIRES_JS") {
+          // The MyFloridaMarketplace vendor portal is a JavaScript SPA –
+          // the REST API was unreachable or returned no parseable data.
+          return NextResponse.json<AnalyzeResponse>(
+            {
+              success: false,
+              error:
+                "This MyFloridaMarketplace page requires JavaScript to load and its data API could not be reached. " +
+                "Please open the bid in your browser, download the attached bid document (PDF), and upload it here instead.",
+            },
+            { status: 422 }
+          );
         } else {
           console.error("Scraping error:", scrapeError);
           combinedContent += `Note: Could not fully scrape the URL. URL: ${url}\n\n`;
